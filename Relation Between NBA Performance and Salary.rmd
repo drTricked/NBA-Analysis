@@ -1,0 +1,342 @@
+---
+title: "Relation between NBA performance and Salary"
+author: ""
+date: "22/12/2020"
+output: pdf_document
+header-includes:
+    - \usepackage[labelformat=empty]{caption}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Abstract
+
+Three models are created to predict the value of an NBA player's salary. The models are based on a per game statistics, more advanced statistics like Win Shares, and Box Plus/Minus and a model using both of those stats. The model using residuals compares how players are getting paid and what is predicted. This helps determine how much a player should be getting paid, and concludes if a player is being under or over paid based on their performance. Further it can help predict what the player should then be paid the next contracting year.
+
+The code and dataset for this analysis can be found here:
+https://github.com/drTricked/NBA-Analysis
+
+## Keywords
+Keywords: Observational Study, Multiple linear Regression, NBA, Basketball, Salary
+
+## Introduction
+
+In the NBA, a player's performance is often associated with the amount of money they are being paid. Player's with bigger and more impactive roles are often the recipients of these large paychecks. These players can have large stat totals which introduces the question, what values correlate with a players salary. Are players really overpaid or underpaid relative to their salaries?
+
+What will show an impactive role? Potentially some variables that could be most important are the offensive statistics that aid in a team's win. This includes points and assists (a pass to a teammate that leads to a score) to name a few. Salary is important value to investigate, because a team's decision is often influenced by the salary of their current player and the players that they aim to sign.
+
+Often when looking at relation between variables a type of regression analysis is used. This statistical method can be used to help determine how strong a connection between one response variables and other explanatory variables. In this report, a multilinear regression analysis will be used to investigate the relationship between different variables mainly from a set of per game statistics and more advanced basketball statistics. These include points per game or win shares (an estimate of how much a player contributes to a win) for example. 
+
+We will be combining datasets to create one single dataset holding all the information about the players. In the Methodology section (Section 2), details about the dataset and the model that we create will be shown. Then following, the Results section (Section 3) will show the results from the model. Then our analysis will end with a discussion and conclusion found in the Conclusion section (Section 4).
+
+
+## Methodology
+
+Data:
+
+Three datasets will be used for the analysis. All the data comes from the website Basketball Reference, where they were converted into csv files. The first dataset is for the salary amount of the contract of all the players in the 2019-2020 season. The second dataset holds the per game statistics of each player, and the third dataset holds some more advanced statistics of the player. 
+
+```{r echo=FALSE, include=FALSE}
+library(stringr)
+library(dplyr)
+library(corrplot)
+library(knitr)
+library(broom)
+
+#margin issues
+opts_knit$set(global.par = TRUE)
+
+#http://web.archive.org/web/20201113205930/https://www.basketball-reference.com/contracts/players.html
+salary_2019 <- read.csv("dataset/2019 salaries.csv")
+names(salary_2019)[names(salary_2019) == "ï..Player"] <- "Player"
+
+#change value of salary from character to numeric
+salary_2019$Salary <- str_remove(salary_2019$Salary, "[$]")
+salary_2019$Salary <- str_remove_all(salary_2019$Salary, "[,]")
+salary_2019$Salary <- as.numeric(as.character(salary_2019$Salary))
+
+#when players are paid from a different team like from clearing waivers there will be multiple rows so we combine them
+#salary_2019 <- salary_2019 %>% group_by(Player) %>% summarise(Salary = sum(Salary))
+salary_2019 <- salary_2019[order(salary_2019[,1]),]
+
+```
+
+For the first dataset, it can be seen that there are two columns one for the player name, and one for the respective salary. One issue with the dataset is that some players will show up more than once, this is due to other contract issues that often arises from trades or waivers that allow a player to be paid from a previous team then their current team. An example of this is like the player Alfonzo McKinnie.\
+`r kable(salary_2019[13:15,], caption = "Table 1: Salary Issue")`
+He had received a contract from the Cleveland Cavaliers, only to be waived. McKinnie was removed from the roster, he later was signed with the same team to a 10-day contract and then resigned with another 10-day contract. For these observations we combine them into one data value.
+`r salary_2019 <- salary_2019 %>% group_by(Player) %>% summarise(Salary = sum(Salary))`
+The dataset also contains the values of the salary originally as strings, so the data is cleaned to produce salary as numeric values.
+`r hist(salary_2019$Salary, breaks=300)` 
+Looking at the data, salary appears similar to a log normal distribution, then a logarithmic transformation is suitable.
+`r hist(log(salary_2019$Salary), breaks=300)` 
+`r kable(salary_2019[2:6,], caption = "Table 2: Salary Dataset Head")`
+
+
+```{r echo=FALSE}
+#https://www.basketball-reference.com/leagues/NBA_2020_per_game.html
+season_2019 <- read.csv("dataset/2019 season stats.csv")
+ss2019 <- na.omit(season_2019)
+ss2019 <- subset(ss2019, select = -Rk)
+```
+
+The second dataset holds the values of a player's per game statistic. One problem with this data is the existence of NA values. This occurs due to one of the values being a percentage, the ratio between shots made and shots attempted. Clearly the percentage cannot exist if the player has 0 attempted shots. So those observations are removed from the dataset. The players with these NA values fortunately are players that often have very small amounts of games played. Thus they should not be representative of the population that is the players of the 2019-2020 season.
+
+Another issue is that for a player that existed on more than one team, they will have multiple observations, including a TOT (two or more teams) which combines the statistics for each of the observations. In cleaning this dataset, only the variables with TOT will remain over the other individual observations for a player. 
+`r kable(ss2019[16:18, 1:4], caption = "Table 3: TOT example")`
+
+
+```{r echo=FALSE}
+# reduce to only tot not three rows
+ss2019 <- ss2019 %>% distinct(Player, .keep_all = TRUE)
+```
+
+`r kable(ss2019[2:4, 1:10], caption = "Table 4: Per Game Dataset Head")`
+`r kable(ss2019[2:4, c(1,11:20)])`
+`r kable(ss2019[2:4, c(1,21:29)])`
+
+```{r echo=FALSE}
+perGame_table <- cbind(colnames(ss2019), c("Player Name", "Position", "Age", "Team Initials", "Games Played", "Games Started", "Minutes Per Game Played", "Field Goals Per Game", "Field Goals Attempted Per Game", "Field Goals Percentage", "3 Point Field Goals Per Game", "3 Point Field Goals Attempted Per Game", "3 Point Field Goal Percentage", "2 Point Field Goals Per Game", "2 Point Field Goals Attempted Per Game", "2 Point Field Goal Percentage", "Effective Field Goal Percentage", "Free Throws Per Game", "Free Throws Attempted Per Game", "Free Throw Percentage", "Offensive Rebounds Per Game", "Defensive Rebounds Per Game", "Total Rebounds Per Game", "Assists Per Game", "Steals Per Game", "Blocks Per Game", "Turnovers Per Game", "Personal Fouls", "Points Per Game"))
+colnames(perGame_table) <- c("Variables", "Meanings")
+
+```
+
+\
+
+`r kable(perGame_table, caption = "Table 5: Per Game Statitics Meaning")`
+
+Some further explanation to the variables:
+A field goal is a basket scored that does not come from a free throw. 
+Free throws are shots taken behind the free throw line that are awarded from a foul.
+A rebound is when a player retrieves the ball after a missed field goal or free throw.
+An assist is given for the player who's pass to their teammate lead to a score by field goal from that teammate.
+Blocks occur when a defensive player legally deflects an opposing players shot.
+A steal is when a defensive player leggally causes a turnover.
+Turnovers are when a player loses possession of the ball to the opposing team by the players actions.
+
+The third dataset holds more advanced statistics and follows similar issues as the previous dataset. Thus similar data cleaning is used.
+
+```{r echo=FALSE}
+#https://www.basketball-reference.com/leagues/NBA_2020_advanced.html
+season_adv <- read.csv("dataset/2019 adv stats.csv")
+season_adv <- na.omit(season_adv)
+# reduce to only tot not three rows
+ssADV2019 <- subset(season_adv, select = -Rk)
+ssADV2019 <- ssADV2019 %>% distinct(Player, .keep_all = TRUE)
+```
+
+`r kable(ssADV2019[2:4, 1:10], caption = "Table 6: Per Game Dataset Head")`
+`r kable(ssADV2019[2:4, c(1,11:20)])`
+`r kable(ssADV2019[2:4, c(1,21:26)])`
+
+```{r echo=FALSE}
+adv_table <- cbind(colnames(ssADV2019), c("Player Name", "Position", "Age", "Team Initials", "Games Played", "Minutes Played", "Player Efficiency Rating", "True Shooting Percentage", "3 Point Attempt Rate", "Free Throw Attempt Rate", "Offensive Rebound Percentage", "Defensive Rebound Percentage", "Total Rebound Percentage", "Assist Percentage", "Steal Percentage", "Block Percentage", "Turnover Percentage", "Usage Percentage", "Offensive Win Shares", "Defensive Win Shares", "Win Shares", "Win Shares / 48 Minutes", "Offensive Box Plus/Minus", "Defensive Box Plus/Minus", "Box Plus/Minus", "Value over Replacement Player"))
+colnames(adv_table) <- c("Variables", "Meanings")
+
+```
+
+\
+
+`r kable(adv_table, caption = "Table 7: Advanced Statitics Meaning")`
+
+Some further explanation to the variables:
+Many of the percentages are calculated for when the player is on the court. 
+Win shares is an estimate of the number of wins a player contributes to.
+Box Plus/Minus is an estimate of the points per 100 possessions a player contributes relative to the league average player.
+
+Each of these datasets come from observational data. It is collected as public information from the National Basketball Association (NBA). The population would be all the players in the NBA over its 74 years, while this frame is based on the players of the 2019-2020 season. Both of the two datasets, for statistics of per game and for more advanced statistics they include statistics like the Win Shares or the Box Plus/Minus.
+
+<!--
+Should go more in depth about the values and their importance like why is win shares or box plus minus good
+
+-->
+
+```{r echo=FALSE}
+dataset <- merge(salary_2019, ss2019, by="Player")
+model_data_uncleaned <- select(dataset, MP:PTS)
+model_data <- select(model_data_uncleaned, FG., X3P., X2P., FT., TRB:PTS, -TOV)
+```
+
+For the first model it is only based on the combination of salary and the points per game statistics, the second model builds on the combination of salary and the advanced statistics, while the third model will be based on both points per game statistics and the advanced statistics. When looking at the values for the first model, there are some strongly correlated values. This comes from the fact that the values used to calculate the percentage statistics are included, thus only the percentage variables are kept. Further we remove the predictor of Turnovers per game since it has high collinearity with many other variables like assists or points. Since the variables are quite similar its fine to keep only the percentage variables instead. 
+
+```{r echo=FALSE}
+corrplot(cor(cbind(dataset$Salary, model_data_uncleaned)), method="pie", type ="upper", title="Figure 1: Per Game Correlation")
+```
+
+
+```{r echo=FALSE}
+dataset_adv <- merge(salary_2019, ssADV2019, by="Player")
+dataset_adv <- dataset_adv[-193,]
+model_data_adv_uncleaned <- select(dataset_adv, MP:VORP)
+model_data_adv <- select(model_data_adv_uncleaned, -ORB., -DRB., -OWS, -DWS, -OBPM, -DBPM, -WS.48, -VORP, -BPM, -MP)
+```
+
+The second model looks at more advanced statistics, like Box Plus/Minus, and Win Share. Looking at the correlation coefficients there are overlapping variables so we remove them. Similarly with this reasoning, the variables that offer both offensive and defensive specifics are dropped for their normal total counterparts. For instance the variables of offensive win shares and defensive win shares are dropped where win shares is kept.
+
+```{r echo=FALSE}
+corrplot(cor(cbind(dataset_adv$Salary, model_data_adv_uncleaned)), method="pie", type="upper", title="Figure 2: Advanced Statistics Correlation")
+```
+
+```{r echo=FALSE}
+basic <- select(merge(salary_2019, ss2019, by="Player"), Player, FG., X3P., X2P., FT., TRB:PTS, -TOV)
+adv <- select(merge(salary_2019, ssADV2019, by="Player"), -ORB., -DRB., -OWS, -DWS, -OBPM, -DBPM, -WS.48, -VORP, -BPM, -MP)
+full_dataset <- merge(adv, basic, by="Player")
+
+model_data_full_uncleaned <- select(full_dataset, PER:PTS)
+correlation_data <- cor(select(full_dataset, Salary, PER:PTS))
+model_data_full <- select(model_data_full_uncleaned, -FG., -AST., -`BLK.`)
+
+```
+
+The third model uses all three of the datasets, and similarly the same reasonings are applied on what variables are dropped. Looking at the correlation coefficients, although the dataset has both a per game statistic and a similar percentage statistic, only if there is high correlation will the variable be dropped. For instance Assist percentage is dropped.
+
+
+```{r echo=FALSE}
+corrplot(cor(cbind(full_dataset$Salary, model_data_full_uncleaned)), method="pie", type="upper", title="Figure 3: Combined Correlation")
+```
+
+Model: 
+
+Given our data we choose to do a multiple linear regression on our variable of interest Salary. As mentioned in the data section, Salary shows a similar pattern to an exponential distribution so we take a log transformation on the value of salary. We hope to predict the value of a players salary so multiple regression is a good choice. Our dataset offers a lot of options of predictor values which we can use to help predict the response variable of log(salary).
+
+
+```{r echo=FALSE, include=FALSE}
+full_m <- lm(log(dataset$Salary)~ . , data=model_data)
+AIC_m <- step(full_m, direction="both")
+BIC_m <- step(full_m, direction="both", k=log(length(model_data)))
+summary(AIC_m)
+summary(BIC_m)
+
+plot(AIC_m)
+AIC_m_res <- cbind(dataset$Player, residuals(AIC_m))
+AIC_m_res <- AIC_m_res[order(AIC_m_res[,2]),]
+colnames(AIC_m_res) <- c("Player", "Residuals")
+```
+
+```{r echo=FALSE, include=FALSE}
+full_m2 <- lm(log(dataset_adv$Salary)~ . , data=model_data_adv)
+AIC_m2 <- step(full_m2, direction="both")
+BIC_m2 <- step(full_m2, direction="both", k=log(length(model_data_adv)))
+
+summary(AIC_m2)
+summary(BIC_m2)
+
+cor(model_data_adv)
+
+plot(AIC_m2)
+AIC_m_res2 <- cbind(dataset$Player, residuals(AIC_m2))
+AIC_m_res2 <- AIC_m_res2[order(AIC_m_res2[,2]),]
+colnames(AIC_m_res2) <- c("Player", "Residuals")
+```
+
+```{r echo=FALSE, include=FALSE}
+full_m3 <- lm(log(full_dataset$Salary)~ . , data=model_data_full)
+AIC_m3 <- step(full_m3, direction="both")
+BIC_m3 <- step(full_m3, direction="both", k=log(length(model_data_full)))
+
+summary(AIC_m3)
+summary(BIC_m3)
+
+plot(AIC_m3)
+AIC_m_res3 <- cbind(dataset$Player, residuals(AIC_m3))
+AIC_m_res3 <- AIC_m_res3[order(AIC_m_res3[,2]),]
+colnames(AIC_m_res3) <- c("Player", "Residuals")
+```
+
+```{r echo=FALSE, include=FALSE}
+summary(AIC_m)
+cor(cbind(log(dataset$Salary), model_data))
+summary(AIC_m2)
+cor(cbind(log(dataset_adv$Salary), model_data_adv))
+summary(AIC_m3)
+summary(BIC_m3)
+cor(cbind(log(full_dataset$Salary), model_data_full))
+```
+
+We end up with three models. The first model is based upon looking only at simple per game statistics. The second looks at using more advanced statistics, and the third model combines both of them. 
+The first model is based on the stats: Field Goal Percentage, 3 Point Percentage, 2 Point Percentage, Free Throw Percentage, Total Rebounds, Assists, Blocks, and Points per game. Where assists are the most significant variable, while based on correlation coefficients, Points is first with Total Rebounds following it as the highest correlation coefficients. Viewing the diagnostic plots the model satisfies assumptions.\
+
+`r kable(tidy(AIC_m), caption = "Table 8: Per Game Model")`
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(AIC_m, main ="Figure 4: Diagnostic Plots")
+```
+
+
+The second model is based on the stats: Player Efficiency Rating, True Shooting Percentage, 3 Point Attempt Rate, Free Throw Attempt Rate, Assist Percentage and Win Shares. Where Win Shares are the most significant, while based on correlation coefficients, Win Shares has the highest correlation coefficient and Player Efficiency Rating second. Viewing the diagnostic plots the model satisfies assumptions.\
+
+`r kable(tidy(AIC_m2), caption = "Table 9: Per Game Model")`
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(AIC_m2, main ="Figure 5: Diagnostic Plots")
+```
+
+The third model is based on the stats: Free Throw Rate, Total Rebound Percentage, Steals Percentage, Usage Percentage, Assists, Steals, Blocks, Personal Fouls, and Points. Points is the most significant value, with Points and Win Shares having the highest correlation coefficient. Viewing the diagnostic plots the model satisfies assumptions.
+
+`r kable(tidy(AIC_m3), caption = "Table 10: Per Game Model")`
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(AIC_m3, main ="Figure 6: Diagnostic Plots")
+```
+
+To produce the model we use stepwise model selection with both AIC and BIC, where we end up with the same model using both methods. Stepwise is a combination of both forward and backward selection. This is one method of variable selection, this choice allows us to lower the prediction error of the model. 
+
+## Results
+
+Looking at all three models, and the coefficient values. There seems to be values that have a larger effect by the values.
+
+In the first model, variable selection chooses some percentage values as well as some per game statistics. Notably, the assists per game value is the most significant. This is not as surprising as assists correlate with getting points. A player with more assists can increase the offensive abilities of their whole team. This is where the importance of point guards, who direct the offense and often possess the ball the most, have an impact on the flow of the offense. Assists can also imply that the team's offense involves passing the ball around a lot, ball movement is often important in many strong offensive systems. Assists also could imply how a player is making the players around them better. Recall that based on correlation coefficients, points and total rebounds had been the two highest values. This is not surprising either as points are required to win the game. Further, many of the players with high salaries are the superstar caliber players who average high amounts of points every game. These are the star players who are at the top of their team. Similarly, rebounds is another important stat that can often have high values.
+
+In the second model, variable selection chooses a mix of different advanced statistics. Recall win shares had the most significance, which by definition would be an important stat to base a salary on. Win shares is an estimate of the number of wins contributed by a player. Therefore it makes sense that a player who contributes to more wins would be worth more. Free throw attempt rate was second significant which also carries more meaning. A player who shoots more freethrows will be fouled more, this allows easier points and can cause foul trouble for opposing player. 
+
+In the third model, variable selection chooses a mix of variables including variables that were not chosen in the individual models above. The model still chooses points as the most significant value with win shares as the second significance similar to the previous models. When looking at the coefficients, some of them include negative correlations which can be surprising as most values should contribute to a positive increase in salary. This is one thing that could be further investigated.
+
+`r kable(head(AIC_m_res), caption = "Table 11.1: Lower Residuals")`
+`r kable(tail(AIC_m_res), caption = "Table 11.2: Upper Game Model")`
+
+`r kable(head(AIC_m_res2), caption = "Table 12.1: Lower Game Model")`
+`r kable(tail(AIC_m_res2), caption = "Table 12.2: Upper Game Model")`
+
+`r kable(head(AIC_m_res3), caption = "Table 13.1: Lower Game Model")`
+`r kable(tail(AIC_m_res3), caption = "Table 13.2: Upper Game Model")`
+
+Looking at the residual values, a player who is underpaid based on the model will have a larger negative value, and a player who is overpaid will have a large positive value.
+Comparing models, it can be seen that players show up in the top 5 overpaid or underpaid for more than one model. For instance players like Allen Crabbe and Brandon Knight are deemed underpaid in both models. 
+
+## Discussion
+
+Summary:
+
+After cleaning and removing variables with collinearity, three models were created to predict the value of the log transformed salary values. The models showed similarity to each other, and had similar predictions. 
+
+Conclusion:
+
+The main variables in the prediction of models were Points and Win Shares, a player's value in their salary is mainly concerned with these two values. Simplistically, a player is paid based on their contribution to winning. A player who scores a large amount of points should be getting paid a large amount for those abilities. Win shares captures the value of more variables that can help sum up their importance into one single statistic. Thus a player contributing all over through other statistics like blocks or assists, can change their win share values. The models show that even with more advanced statistics like how much a player attempts three point shots, or their Usage percentage the best model comes from its simplicity. At the end of the day, the best team is the team with more points. The player that helps achieve those more points, often themselves individually scoring, will receive the most money.
+
+Weakness and next step:
+
+Some of the weakness the model suffers come from the choice in data cleaning. Players with NA values were omitted and justified due to having low amount of games played, this could be looked at again, to see if there was any influence. Similarly, the values in the pergame statistic are calculated based on games played. This could potentially lead to values being higher in certain contexts. Say a player who only plays a couple games, but in those couple games their stats are quite high. Would this player still be able to maintain those stats given more games? Similarly with percentages, a player may have a high percentage due to small amount of the stat taken (ex: 1 three point made, 1 three point attempted) which could influence the model.
+
+Another weakness is that most NBA players will sign a 3-5 year contract, the model does not take this into any consideration. This can skew the model because a player could be on decline from their initial season of the contract and progressively gets worse even if the money stayed the same or increased per year on the contract. This could lead to a player being deemed overpaid and underperforming. Salary also has more depth, as salary can be quite relative to the team. One team could offer more to a player based on their current salary limits (salary cap). 
+
+The next steps would include looking at models that can explain more with other information, than the statistics. More statistics could be contributed, for instance a newer model can look at how many years a players has been in the league or what position they are. Looking at how many seasons the player plays, intuitively is a good choice. Since many rookie contracts are quite low, and veteran players will take a smaller wage to play on championship caliber teams. Another model which takes into consideration the position of the player could also be insightful, depending on the position certain stats are more expected. For instance, a power forward or center is expected to get more rebounds, thus their average is higher which could be influencial. Similarly, with point guards often getting more assists. 
+
+Furthermore, this analysis only looked at the 2019-2020 season, potentially looking at other seasons as a whole or individually could show different results. 
+
+
+## References
+
+All of the information relative to the basketball statistics and data used come from the website basketball-reference.com, specifically these three websites:\
+http://web.archive.org/web/20201113205930/https://www.basketball-reference.com/contracts/players.html
+https://www.basketball-reference.com/leagues/NBA_2020_per_game.html
+https://www.basketball-reference.com/leagues/NBA_2020_advanced.html
+
+This is analysis was written using r, and other r libraries. These include stringr, dplyr, corrplot, knitr, and broom.
+
+
+
+
