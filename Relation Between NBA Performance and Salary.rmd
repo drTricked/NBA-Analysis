@@ -1,6 +1,6 @@
 ---
 title: "Relation between NBA performance and Salary"
-author: ""
+author: "Mark David Sabado"
 date: "22/12/2020"
 output: pdf_document
 header-includes:
